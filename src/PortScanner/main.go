@@ -23,19 +23,7 @@ func checkError(err error) {
 	}
 }
 
-// PathFileExists checks if path is existential
-func PathFileExists(path string) (bool, error) {
-	_, err := os.Stat(path)
-	if err == nil {
-		return true, nil
-	}
-	if os.IsNotExist(err) {
-		return false, err
-	}
-	return false, err
-}
-
-// Scanner launchs scan and output mission.
+// Scanner launchs scan and output missions.
 // if you want to print the result to stdout, just pass outPath empty("")
 func Scanner(ipList []string, portList []string, threads int, outPath string) {
 	output := make(chan ScanResult, threads)
