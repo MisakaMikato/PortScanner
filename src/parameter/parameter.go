@@ -12,14 +12,15 @@ import (
 	"strings"
 )
 
-type paramStruct struct {
-	target        string
-	thread        int
-	outputNormal  string
-	port          string
-	inputFileName string
-	excludeFile   string
-	exclude       string
+// ParamStruct stroe user's input parameter
+type ParamStruct struct {
+	Target        string
+	Thread        int
+	OutputNormal  string
+	Port          string
+	InputFileName string
+	ExcludeFile   string
+	Exclude       string
 }
 
 // PathFileExists checks if path is existential
@@ -41,44 +42,89 @@ func PathFileExists(path string) (bool, error) {
 // 	}
 // }
 
-func getTargetList(param paramStruct) ([]string, error) {
-	var targetList []string
-
+func getHostFromString(hostStr string) []string {
+	var hostList []string
 	// Read from terminal parameter
-	if param.target != "" {
-		tmpList := strings.Split(param.target, ",")
+	tmpList := strings.Split(hostStr, ",")
+	for _, i := range tmpList {
+		// handling ip address, for example 192.168.1.0/24
+		tmp, _ := gip.GetIPSubnet(i, 32)
+		hostList = append(hostList, tmp...)
+	}
+	return hostList
+}
+
+func getHostFromFile(filePath string) ([]string, error) {
+	var hostList []string
+	isExits, err := PathFileExists(filePath)
+	if isExits {
+		content, _ := ioutil.ReadFile(filePath)
+		result := strings.Replace(string(content), "\r", "", -1)
+		tmpList := strings.Split(result, "\n")
 		for _, i := range tmpList {
 			// handling ip address, for example 192.168.1.0/24
 			tmp, _ := gip.GetIPSubnet(i, 32)
-			targetList = append(targetList, tmp...)
+			hostList = append(hostList, tmp...)
 		}
+		return hostList, nil
+	}
+	return nil, err
+}
+
+// GetTargetList function handles Target and InputFilename parameters of ParamStruct.
+func GetTargetList(param ParamStruct) ([]string, error) {
+	var targetList []string
+
+	// Read from terminal parameter
+	if param.Target != "" {
+		tmp := getHostFromString(param.Target)
+		targetList = append(targetList, tmp...)
 	}
 
 	// Read from file
-	if param.inputFileName != "" {
-		isExits, err := PathFileExists(param.inputFileName)
-		if isExits {
-			content, _ := ioutil.ReadFile(param.inputFileName)
-			result := strings.Replace(string(content), "\r", "", -1)
-			tmpList := strings.Split(result, "\n")
-			for _, i := range tmpList {
-				// handling ip address, for example 192.168.1.0/24
-				tmp, _ := gip.GetIPSubnet(i, 32)
-				targetList = append(targetList, tmp...)
-			}
-		} else {
+	if param.InputFileName != "" {
+		tmp, err := getHostFromFile(param.InputFileName)
+		if err != nil {
 			return nil, err
 		}
+		targetList = append(targetList, tmp...)
 	}
 
 	if len(targetList) == 0 {
 		err := errors.New("WARNING: No targets were specified, so 0 hosts scanned")
 		return nil, err
 	}
+	targetList = filterExcludeHost(param, targetList)
 	return targetList, nil
 }
 
-func getPortList(param paramStruct) ([]int, error) {
+func filterExcludeHost(param ParamStruct, targetList []string) []string {
+	excludeMap := make(map[string]bool)
+	var newTargetList []string
+	if param.Exclude != "" {
+		tmp := getHostFromString(param.Exclude)
+		for i := 0; i < len(tmp); i++ {
+			excludeMap[tmp[i]] = true
+		}
+	}
+
+	if param.ExcludeFile != "" {
+		tmp, _ := getHostFromFile(param.ExcludeFile)
+		for i := 0; i < len(tmp); i++ {
+			excludeMap[tmp[i]] = true
+		}
+	}
+
+	for i := 0; i < len(targetList); i++ {
+		if _, ok := excludeMap[targetList[i]]; !ok {
+			newTargetList = append(newTargetList, targetList[i])
+		}
+	}
+	return newTargetList
+}
+
+// GetPortList function handles Port parameter of ParamStruct.
+func GetPortList(param ParamStruct) ([]int, error) {
 	var portList []int
 	vis := make(map[int]bool)
 
@@ -91,11 +137,11 @@ func getPortList(param paramStruct) ([]int, error) {
 		27017, 37777, 50000, 50070, 61616,
 	}
 
-	if param.port == "" {
+	if param.Port == "" {
 		return defaultPortList, nil
 	}
 
-	baseList := strings.Split(param.port, ",")
+	baseList := strings.Split(param.Port, ",")
 	for i := 0; i < len(baseList); i++ {
 		// if the format of port is like 1-20000
 		seqIndex := strings.Index(baseList[i], "-")
@@ -137,20 +183,21 @@ func getPortList(param paramStruct) ([]int, error) {
 
 }
 
-func paramInit() (paramStruct, error) {
-	var param paramStruct
+// ParamInit handles users' input.
+func ParamInit() (ParamStruct, error) {
+	var param ParamStruct
 
-	flag.StringVar(&param.target, "t", "", "-t <host1[,host2][,host3],...>: Scan specified targets")
-	flag.StringVar(&param.port, "p", "", "-p <port ranges>: Only scan specified ports")
-	flag.StringVar(&param.exclude, "exclude", "", "--exclude <host1[,host2][,host3],...>: Exclude hosts/networks")
-	flag.StringVar(&param.excludeFile, "excludefile", "", "--excludefile <exclude_file>: Exclude list from file")
-	flag.StringVar(&param.inputFileName, "iL", "", "-iL <input_file_name>: Input from list of hosts/networks")
-	flag.StringVar(&param.outputNormal, "oN", "", "-oN <file>: Output scan in normal")
-	flag.IntVar(&param.thread, "thread", 64, "--thread <size>: Parallel target scan group size")
+	flag.StringVar(&param.Target, "t", "", "-t <host1[,host2][,host3],...>: Scan specified targets")
+	flag.StringVar(&param.Port, "p", "", "-p <port ranges>: Only scan specified ports")
+	flag.StringVar(&param.Exclude, "exclude", "", "--exclude <host1[,host2][,host3],...>: Exclude hosts/networks")
+	flag.StringVar(&param.ExcludeFile, "excludefile", "", "--excludefile <exclude_file>: Exclude list from file")
+	flag.StringVar(&param.InputFileName, "iL", "", "-iL <input_file_name>: Input from list of hosts/networks")
+	flag.StringVar(&param.OutputNormal, "oN", "", "-oN <file>: Output scan in normal")
+	flag.IntVar(&param.Thread, "thread", 64, "--thread <size>: Parallel target scan group size")
 	flag.Usage = usage
 	flag.Parse()
 
-	if param.target == "" && param.inputFileName == "" {
+	if param.Target == "" && param.InputFileName == "" {
 		err := errors.New("WARNING: No targets were specified, so 0 hosts scanned")
 		return param, err
 	}

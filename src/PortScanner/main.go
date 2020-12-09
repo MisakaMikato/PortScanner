@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"main/src/parameter"
 	"net"
 	"os"
 	"time"
@@ -13,7 +14,7 @@ import (
 // ScanResult represents the ip has opened a specific port.
 type ScanResult struct {
 	IP   string `json:"ip"`
-	Port string `json:"port"`
+	Port int    `json:"port,string"`
 }
 
 func checkError(err error) {
@@ -25,10 +26,11 @@ func checkError(err error) {
 
 // Scanner launchs scan and output missions.
 // if you want to print the result to stdout, just pass outPath empty("")
-func Scanner(ipList []string, portList []string, threads int, outPath string) {
-	output := make(chan ScanResult, threads)
-	go ScanPort(ipList, portList, output, threads)
-	Output(outPath, output)
+// TODO: use different 'outPath' format to implement variety output, eg: json://data.test, xml://data.test
+func Scanner(ipList []string, portList []int, threads int, outPath string) {
+	outputChan := make(chan ScanResult, threads)
+	go ScanPort(ipList, portList, outputChan, threads)
+	Output(outPath, outputChan)
 }
 
 // Output writes scan result to stdout if outPath is empty("")
@@ -56,12 +58,11 @@ func Output(outPath string, outputChan chan ScanResult) {
 }
 
 // ScanPort implements a simple port scanning.
-func ScanPort(ipList []string, portList []string, output chan ScanResult, threads int) {
+func ScanPort(ipList []string, portList []int, output chan ScanResult, threads int) {
 	defer close(output)
 
 	pool := gpool.New(threads)
 	for _, ip := range ipList {
-		fmt.Printf("[INFO] Scanning %s\n", ip)
 		for _, port := range portList {
 			pool.Add(1)
 			go ScanSinglePort(ip, port, output, pool)
@@ -71,14 +72,14 @@ func ScanPort(ipList []string, portList []string, output chan ScanResult, thread
 }
 
 // ScanSinglePort implements a simple single port scanning.
-func ScanSinglePort(ip string, port string, output chan ScanResult, pool *gpool.Pool) {
+func ScanSinglePort(ip string, port int, output chan ScanResult, pool *gpool.Pool) {
 	defer func() {
 		if pool != nil {
 			pool.Done()
 		}
 	}()
-
-	_, err := net.DialTimeout("tcp", ip+":"+port, time.Second*3)
+	tcpAddr := fmt.Sprintf("%s:%d", ip, port)
+	_, err := net.DialTimeout("tcp", tcpAddr, time.Second*3)
 	if err != nil {
 		return
 	}
@@ -87,6 +88,11 @@ func ScanSinglePort(ip string, port string, output chan ScanResult, pool *gpool.
 }
 
 func main() {
-	_, err := net.DialTimeout("tcp", "127.0.0.1:446", time.Second*3)
-	checkError(err)
+	param, initErr := parameter.ParamInit()
+	checkError(initErr)
+	targetList, targetErr := parameter.GetTargetList(param)
+	checkError(targetErr)
+	portList, portErr := parameter.GetPortList(param)
+	checkError(portErr)
+	Scanner(targetList, portList, param.Thread, param.OutputNormal)
 }
